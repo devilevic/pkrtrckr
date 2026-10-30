@@ -1,0 +1,15 @@
+---
+# cPanel "Git Version Control" deployment for pkrtrckr.
+# Copies only the files the website needs into the live folder and sets
+# readable permissions. api/config.php is not in Git, so it is never touched.
+deployment:
+  tasks:
+    # The domain's document root (cPanel > Domains > pkrtrckr.com > Document Root)
+    - export DEPLOYPATH=/home/btcpvdhe/pkrtrckr.com
+    - /bin/mkdir -p $DEPLOYPATH/api $DEPLOYPATH/assets
+    - /bin/cp index.html favicon.ico manifest.webmanifest .htaccess $DEPLOYPATH/
+    - /bin/cp api/index.php api/.htaccess $DEPLOYPATH/api/
+    - /bin/cp assets/* $DEPLOYPATH/assets/
+    - /bin/chmod 755 $DEPLOYPATH/api $DEPLOYPATH/assets
+    - /bin/chmod 644 $DEPLOYPATH/index.html $DEPLOYPATH/favicon.ico $DEPLOYPATH/manifest.webmanifest $DEPLOYPATH/.htaccess $DEPLOYPATH/api/index.php $DEPLOYPATH/api/.htaccess
+    - /bin/chmod 644 $DEPLOYPATH/assets/*
