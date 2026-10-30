@@ -1,0 +1,8 @@
+# Real database password and secret — never commit
+api/config.php
+
+# macOS
+.DS_Store
+
+# Local zips/backups
+*.zip

@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>pkrtrckr — private poker results tracker</title>
+<meta name="description" content="A private, encrypted poker results tracker. Log cash games and tournaments in seconds and see your hourly rate. Sessions are encrypted on your device.">
+<meta name="theme-color" content="#11151a" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f5f6f3" media="(prefers-color-scheme: light)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="pkrtrckr">
+<link rel="icon" href="favicon.ico" sizes="48x48">
+<link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+<link rel="icon" href="assets/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="icon" href="assets/favicon-16.png" type="image/png" sizes="16x16">
+<link rel="apple-touch-icon" href="assets/icon-180.png">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="assets/app.css?v=2">
+<script src="assets/app.js?v=2" defer></script>
+</head>
+<body>
+
+<!-- ============ AUTH ============ -->
+<main id="auth" class="auth" hidden>
+  <div class="auth-card">
+    <div class="brand">
+      <img src="assets/icon.svg" alt="" width="44" height="44">
+      <h1>pkrtrckr</h1>
+    </div>
+    <p class="tag">Your poker results, encrypted on your device.</p>
+
+    <div class="seg" role="tablist" id="authTabs">
+      <button type="button" role="tab" data-mode="login" aria-selected="true">Sign in</button>
+      <button type="button" role="tab" data-mode="signup" aria-selected="false">Create account</button>
+    </div>
+
+    <form id="authForm" autocomplete="on" novalidate>
+      <label class="field">
+        <span>Name</span>
+        <input id="authName" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="32" required>
+      </label>
+      <label class="field">
+        <span>Passphrase</span>
+        <input id="authPass" name="password" type="password" autocomplete="current-password" required>
+      </label>
+      <label class="field" id="authPass2Wrap" hidden>
+        <span>Repeat passphrase</span>
+        <input id="authPass2" type="password" autocomplete="new-password">
+      </label>
+      <p class="note warn" id="signupNote" hidden>There's no passphrase reset. Your sessions are encrypted with it, so if you lose it, nobody — including us — can recover your data. Use at least 10 characters.</p>
+      <p class="err" id="authErr" role="alert"></p>
+      <button class="btn primary block" id="authBtn" type="submit">Sign in</button>
+    </form>
+    <p class="fine">No email, no tracking. Sessions are encrypted with AES-256-GCM in your browser before they're sent. You'll be signed out after 15 minutes of inactivity.</p>
+  </div>
+</main>
+
+<!-- ============ APP ============ -->
+<div id="app" class="app" hidden>
+  <header class="top">
+    <div class="brand sm"><img src="assets/icon.svg" alt="" width="26" height="26"><span>pkrtrckr</span></div>
+    <button class="icon-btn" id="menuBtn" aria-label="Settings" aria-haspopup="dialog">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Zm8.6 4.9-.1-1.4 1.9-1.5-2-3.4-2.3.8a8 8 0 0 0-1.2-.7L16.5 5h-4l-.4 2.3c-.4.2-.8.4-1.2.7L8.6 7.2l-2 3.4 1.9 1.5a7 7 0 0 0 0 1.4l-1.9 1.5 2 3.4 2.3-.8c.4.3.8.5 1.2.7l.4 2.4h4l.4-2.4c.4-.2.8-.4 1.2-.7l2.3.8 2-3.4-1.8-1.6Z" opacity=".9"/></svg>
+    </button>
+  </header>
+
+  <!-- ADD / EDIT -->
+  <section class="view" id="view-add" data-view="add">
+    <h2 class="view-title" id="formTitle">New session</h2>
+    <form id="entryForm" novalidate>
+      <div class="seg" id="typeSeg" role="radiogroup" aria-label="Format">
+        <button type="button" role="radio" data-type="cash" aria-checked="true">Cash game</button>
+        <button type="button" role="radio" data-type="tourney" aria-checked="false">Tournament</button>
+      </div>
+
+      <div class="combo" data-list="locations">
+        <label class="field">
+          <span>Location</span>
+          <div class="combo-row">
+            <select id="fLocation" required></select>
+            <button type="button" class="add-btn" aria-label="Add location">+</button>
+          </div>
+        </label>
+        <div class="add-row" hidden><input placeholder="New location, e.g. Holland Casino" maxlength="60"><button type="button" class="btn sm">Add</button></div>
+      </div>
+
+      <div class="combo" data-list="games">
+        <label class="field">
+          <span>Game</span>
+          <div class="combo-row">
+            <select id="fGame" required></select>
+            <button type="button" class="add-btn" aria-label="Add game">+</button>
+          </div>
+        </label>
+        <div class="add-row" hidden><input placeholder="New game, e.g. NL Hold'em" maxlength="40"><button type="button" class="btn sm">Add</button></div>
+      </div>
+
+      <div class="combo" data-list="stakes" id="stakesCombo">
+        <label class="field">
+          <span id="stakesLabel">Stakes</span>
+          <div class="combo-row">
+            <select id="fStakes" required></select>
+            <button type="button" class="add-btn" aria-label="Add stakes">+</button>
+          </div>
+        </label>
+        <div class="add-row" hidden><input id="stakesNew" placeholder="e.g. 1/2 or 2/5" maxlength="20"><button type="button" class="btn sm">Add</button></div>
+      </div>
+
+      <div class="grid2">
+        <label class="field">
+          <span>Duration (minutes)</span>
+          <input id="fMinutes" type="number" inputmode="numeric" min="1" max="5000" step="1" placeholder="240" required>
+          <small class="hint" id="minHint">&nbsp;</small>
+        </label>
+        <label class="check">
+          <input type="checkbox" id="fHU">
+          <span class="box" aria-hidden="true"></span>
+          <span>HU <small>heads-up</small></span>
+        </label>
+      </div>
+
+      <div class="field">
+        <span>Result</span>
+        <div class="result-row">
+          <div class="seg pm" id="pmSeg" role="radiogroup" aria-label="Won or lost">
+            <button type="button" role="radio" data-sign="1" aria-checked="true">Won</button>
+            <button type="button" role="radio" data-sign="-1" aria-checked="false">Lost</button>
+          </div>
+          <div class="money"><span class="cur" id="curSym">€</span><input id="fAmount" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0" required></div>
+        </div>
+      </div>
+
+      <details class="more">
+        <summary>Date &amp; time <span id="whenSummary"></span></summary>
+        <label class="field"><span>Ended at</span><input id="fWhen" type="datetime-local"></label>
+      </details>
+
+      <p class="err" id="formErr" role="alert"></p>
+      <div class="actions">
+        <button type="button" class="btn ghost" id="cancelEdit" hidden>Cancel</button>
+        <button type="button" class="btn danger ghost" id="deleteEntry" hidden>Delete</button>
+        <button type="submit" class="btn primary grow" id="saveBtn">Save session</button>
+      </div>
+    </form>
+    <div class="recent" id="recentBox"></div>
+  </section>
+
+  <!-- LIST -->
+  <section class="view" id="view-list" data-view="list" hidden>
+    <div class="list-head">
+      <h2 class="view-title">Sessions</h2>
+      <span class="muted" id="listCount"></span>
+    </div>
+    <ul class="sessions" id="sessionList"></ul>
+    <nav class="pager" id="pager" aria-label="Pages">
+      <button class="icon-btn" id="prevPage" aria-label="Newer sessions">‹</button>
+      <span id="pageInfo"></span>
+      <button class="icon-btn" id="nextPage" aria-label="Older sessions">›</button>
+    </nav>
+  </section>
+
+  <!-- STATS -->
+  <section class="view" id="view-stats" data-view="stats" hidden>
+    <h2 class="view-title">Stats</h2>
+    <div class="filters" id="filters">
+      <select id="flPeriod" aria-label="Period">
+        <option value="all">All time</option>
+        <option value="30">Last 30 days</option>
+        <option value="90">Last 90 days</option>
+        <option value="ytd">This year</option>
+        <option value="365">Last 12 months</option>
+        <option value="lastyear">Last year</option>
+        <option value="custom">Custom…</option>
+      </select>
+      <select id="flType" aria-label="Format">
+        <option value="">All formats</option>
+        <option value="cash">Cash games</option>
+        <option value="tourney">Tournaments</option>
+      </select>
+      <select id="flGame" aria-label="Game"></select>
+      <select id="flStakes" aria-label="Stakes"></select>
+      <select id="flLocation" aria-label="Location"></select>
+      <select id="flHU" aria-label="Heads-up">
+        <option value="">HU + full ring</option>
+        <option value="hu">Heads-up only</option>
+        <option value="ring">No heads-up</option>
+      </select>
+      <div class="custom-range" id="customRange" hidden>
+        <label><span>From</span><input type="date" id="flFrom"></label>
+        <label><span>To</span><input type="date" id="flTo"></label>
+      </div>
+      <button class="btn sm ghost" id="flReset" type="button">Reset</button>
+    </div>
+    <div id="statsBody"></div>
+  </section>
+
+  <nav class="tabs" aria-label="Main">
+    <button data-go="add" aria-current="page">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></svg>
+      <span>Add</span>
+    </button>
+    <button data-go="list">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h9" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></svg>
+      <span>Sessions</span>
+    </button>
+    <button data-go="stats">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19h16M7 16V11M12 16V6M17 16v-3" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></svg>
+      <span>Stats</span>
+    </button>
+  </nav>
+</div>
+
+<!-- SETTINGS SHEET -->
+<dialog id="settings" class="sheet">
+  <form method="dialog" class="sheet-inner">
+    <div class="sheet-head"><h2>Settings</h2><button class="icon-btn" value="close" aria-label="Close">✕</button></div>
+    <p class="muted" id="whoami"></p>
+    <label class="field"><span>Currency</span>
+      <select id="setCurrency">
+        <option value="EUR">€ Euro</option><option value="USD">$ US dollar</option><option value="GBP">£ Pound</option>
+        <option value="CAD">CA$ Canadian dollar</option><option value="AUD">A$ Australian dollar</option>
+        <option value="CHF">CHF Swiss franc</option><option value="SEK">kr Swedish krona</option>
+        <option value="NOK">kr Norwegian krone</option><option value="DKK">kr Danish krone</option>
+        <option value="PLN">zł Złoty</option><option value="CZK">Kč Koruna</option>
+      </select>
+    </label>
+    <h3>Your lists</h3>
+    <p class="muted small">Remove entries you no longer use. Past sessions keep their values.</p>
+    <div id="listsEditor"></div>
+    <h3>Backup</h3>
+    <div class="row-btns">
+      <button type="button" class="btn sm" id="exportCsv">Export CSV</button>
+      <label class="btn sm file-btn">Import CSV<input type="file" id="importCsv" accept=".csv,text/csv"></label>
+    </div>
+    <p class="muted small">CSV columns: date, type, location, game, stakes, hu, minutes, result. Export is decrypted on your device — keep the file somewhere safe.</p>
+    <p class="err" id="setErr" role="alert"></p>
+    <div class="row-btns spread">
+      <button type="button" class="btn" id="logoutBtn">Sign out</button>
+      <button type="button" class="btn danger ghost" id="deleteAccount">Delete account</button>
+    </div>
+  </form>
+</dialog>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<div class="busy" id="busy" hidden><div class="spinner"></div><p id="busyMsg">Unlocking…</p></div>
+<noscript><p class="noscript">pkrtrckr needs JavaScript — it's what encrypts your data before it leaves your device.</p></noscript>
+</body>
+</html>
