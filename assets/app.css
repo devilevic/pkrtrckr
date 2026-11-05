@@ -354,3 +354,12 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
 .bio-card p { margin: 2px 0 0; font-size: 14px; color: var(--text-2); }
 .bio-card .err { margin-top: 6px; }
 .bio-card .row-btns { margin: 0; }
+
+/* ---------- offline / sync badge ---------- */
+.top .brand.sm { margin-right: auto; }
+.sync {
+  font-size: 12px; font-weight: 650; padding: 4px 10px; border-radius: 999px; margin-right: 4px;
+  background: var(--accent-soft); color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  white-space: nowrap;
+}
+.sync.off { background: var(--warn-bg); color: var(--text); border-color: var(--warn-line); }

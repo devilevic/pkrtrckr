@@ -26,6 +26,9 @@ DirectoryIndex index.html
   <FilesMatch "\.(css|js|svg|png)$">
     Header set Cache-Control "public, max-age=604800"
   </FilesMatch>
+  <Files "sw.js">
+    Header set Cache-Control "no-cache"
+  </Files>
 </IfModule>
 
 AddType application/manifest+json .webmanifest

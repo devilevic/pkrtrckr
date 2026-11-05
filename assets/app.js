@@ -163,12 +163,18 @@ async function bioUnlock() {
     } catch (x) { throw Object.assign(new Error('stale'), { stale: true }); }
     const bits = unb64(pt.mk).buffer;
     const k = await keysFromBits(bits);
+    let offline = false;
     try { await api('login', { username: b.name, auth: k.auth }); }
-    catch (x) { if (/wrong name or passphrase/i.test(x.message)) x.stale = true; throw x; }
+    catch (x) {
+      if (x.offline && loadCache(b.name)) offline = true;
+      else { if (/wrong name or passphrase/i.test(x.message)) x.stale = true; throw x; }
+    }
     Object.assign(S, { name: b.name, key: k.key, auth: k.auth, salt: pt.salt, iter: pt.iter, mk: bits });
+    try { if (offline) await loadOffline(b.name); else await loadData(); }
+    catch (x) { S.key = null; S.auth = ''; S.mk = null; throw x; }
     store('pkr.name', b.name);
-    await loadData();
     enterApp();
+    if (offline) toast('Offline — changes will sync when you’re back online');
   } catch (ex) {
     if (ex.stale) { bioSet(null); renderBio(); err.textContent = 'Fingerprint unlock no longer works for this account. Sign in with your passphrase and turn it on again in Settings.'; }
     else err.textContent = ex.message;
@@ -218,18 +224,32 @@ async function open(box, kind) {
 }
 
 /* ================= api ================= */
-async function api(action, body = {}) {
+class NetErr extends Error {
+  constructor() { super('You’re offline. Check your connection.'); this.offline = true; }
+}
+async function api(action, body = {}, retried = false) {
   let r;
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), 15000); // weak signal: give up and treat as offline
   try {
     r = await fetch(`${API}?a=${action}`, {
-      method: 'POST', credentials: 'same-origin',
+      method: 'POST', credentials: 'same-origin', signal: ctl.signal,
       headers: { 'Content-Type': 'application/json', 'X-Pkr': '1' },
       body: JSON.stringify(body),
     });
-  } catch (e) { throw new Error('Can’t reach the server. Check your connection.'); }
+  } catch (e) { setOnline(false); throw new NetErr(); }
+  finally { clearTimeout(t); }
+  setOnline(true);
   let data = {};
   try { data = await r.json(); } catch (e) { /* non-JSON */ }
-  if (r.status === 401 && S.key && !['login', 'delete_account'].includes(action)) { lock('You were signed out. Sign in again.'); throw new Error('Signed out'); }
+  if (r.status === 401 && S.key && !['login', 'prelogin', 'logout', 'delete_account'].includes(action)) {
+    // The server session can lapse (phone asleep, or unlocked while offline): sign back in quietly once.
+    if (!retried && S.auth) {
+      try { await api('login', { username: S.name, auth: S.auth }, true); return await api(action, body, true); }
+      catch (x) { if (x.offline) throw x; }
+    }
+    lock('You were signed out. Sign in again.'); throw new Error('Signed out');
+  }
   if (!r.ok) throw new Error(data.error || `Server error (${r.status})`);
   return data;
 }
@@ -259,29 +279,47 @@ async function onAuth(e) {
   $('#authBtn').disabled = true;
   busy(authMode === 'signup' ? 'Creating your encryption key…' : 'Unlocking…');
   try {
-    let salt, iter;
+    let salt, iter, offline = false;
     if (authMode === 'signup') {
       salt = b64(crypto.getRandomValues(new Uint8Array(16))); iter = DEFAULT_ITER;
     } else {
-      const p = await api('prelogin', { username: name }); salt = p.salt; iter = p.iter;
+      try { const p = await api('prelogin', { username: name }); salt = p.salt; iter = p.iter; }
+      catch (x) {
+        if (!x.offline) throw x;
+        const c = loadCache(name);
+        if (!c) throw new Error(`You’re offline, and this device has no saved copy for “${name}” yet. Sign in once with a connection first.`);
+        salt = c.salt; iter = c.iter; offline = true;
+      }
     }
     const k = await deriveKeys(pass, salt, iter);
-    await api(authMode, { username: name, auth: k.auth, salt, iter });
+    if (!offline) {
+      try { await api(authMode, { username: name, auth: k.auth, salt, iter }); }
+      catch (x) {
+        if (!x.offline) throw x;
+        if (authMode === 'signup') throw new Error('Creating an account needs a connection.');
+        if (!loadCache(name)) throw new Error(`You’re offline, and this device has no saved copy for “${name}” yet.`);
+        offline = true;
+      }
+    }
     Object.assign(S, { name, key: k.key, auth: k.auth, salt, iter, mk: k.bits });
+    try { if (offline) await loadOffline(name); else await loadData(); }
+    catch (x) { S.key = null; S.auth = ''; S.mk = null; throw x; }
     store('pkr.name', name);
     $('#authPass').value = $('#authPass2').value = '';
-    await loadData();
     enterApp();
     bioOffer();
     if (authMode === 'signup') toast('Account created');
+    if (offline) toast('Offline — changes will sync when you’re back online');
   } catch (ex) {
-    err.textContent = ex.message;
+    err.textContent = ex.offline && authMode === 'signup' ? 'Creating an account needs a connection.' : ex.message;
   } finally {
     busy(); $('#authBtn').disabled = false;
   }
 }
 function lock(msg) {
   S.key = null; S.auth = ''; S.mk = null; S.entries = []; S.prefs = null; S.editId = 0;
+  S.boxes = new Map(); S.prefsBox = null; S.offlineSession = false; Q = [];
+  renderSync();
   $('#bioCard').hidden = true;
   $('#app').hidden = true; $('#auth').hidden = false;
   if ($('#settings').open) $('#settings').close();
@@ -305,26 +343,145 @@ function activity() {
 function defaultPrefs() {
   return { v: 1, currency: 'EUR', lists: { locations: [], games: ["NL Hold'em", 'PLO'], stakes: [], buyins: [] }, type: 'cash' };
 }
-async function loadData() {
-  const data = await api('data');
-  $('#adminLinkWrap').hidden = !data.admin;
-  S.prefs = data.prefs ? { ...defaultPrefs(), ...(await open(data.prefs, 'prefs')) } : defaultPrefs();
+/* ---------- offline support ----------
+ * This device keeps the same encrypted blobs the server has (plus the KDF salt), so the app
+ * can unlock and show everything without a connection. Changes made offline wait in a queue
+ * of encrypted operations and are sent in order when the connection comes back. */
+let Q = [];                         // pending ops: {t:'save'|'delete'|'prefs', id?, iv?, ct?}
+S.boxes = new Map();                // entry id -> {iv, ct}; negative ids = not yet on the server
+S.prefsBox = null;
+S.online = navigator.onLine !== false;
+const CK = n => 'pkr.cache.' + n, QK = n => 'pkr.queue.' + n;
+function loadCache(name) { try { const c = JSON.parse(load(CK(name)) || 'null'); return c && c.v === 1 ? c : null; } catch (e) { return null; } }
+function saveCache() {
+  if (!S.name || !S.key) return;
+  store(CK(S.name), JSON.stringify({ v: 1, salt: S.salt, iter: S.iter, at: Date.now(), prefs: S.prefsBox,
+    entries: [...S.boxes].map(([id, b]) => ({ id, iv: b.iv, ct: b.ct })) }));
+}
+function loadQueue(name) { try { const q = JSON.parse(load(QK(name)) || '[]'); return Array.isArray(q) ? q : []; } catch (e) { return []; } }
+function saveQueue() { if (S.name) store(QK(S.name), Q.length ? JSON.stringify(Q) : null); renderSync(); }
+function forgetDevice(name) { store(CK(name), null); store(QK(name), null); }
+function tmpId() { return -(Date.now() * 100 + Math.floor(Math.random() * 100)); }
+function withQueue(entries, prefsBox) {
+  const list = entries.map(e => ({ id: e.id, iv: e.iv, ct: e.ct }));
+  for (const op of Q) {
+    const i = list.findIndex(e => e.id === op.id);
+    if (op.t === 'save') { const e = { id: op.id, iv: op.iv, ct: op.ct }; if (i >= 0) list[i] = e; else list.push(e); }
+    else if (op.t === 'delete') { if (i >= 0) list.splice(i, 1); }
+    else if (op.t === 'prefs') prefsBox = { iv: op.iv, ct: op.ct };
+  }
+  return { list, prefsBox };
+}
+async function applyBoxes(prefsBox, list) {
+  S.prefsBox = prefsBox || null;
+  S.boxes = new Map(list.map(e => [e.id, { iv: e.iv, ct: e.ct }]));
+  S.prefs = prefsBox ? { ...defaultPrefs(), ...(await open(prefsBox, 'prefs')) } : defaultPrefs();
   for (const k of Object.keys(LISTS)) if (!Array.isArray(S.prefs.lists[k])) S.prefs.lists[k] = [];
   const out = [];
   let bad = 0;
-  for (const e of data.entries) {
+  for (const e of list) {
     try { out.push({ id: e.id, d: await open(e, 'entry') }); } catch (x) { bad++; }
   }
   if (bad) toast(`${bad} session(s) couldn’t be decrypted`);
   S.entries = out; sortEntries();
-  if (!data.prefs) await savePrefs();
 }
-function sortEntries() { S.entries.sort((a, b) => (b.d.at || '').localeCompare(a.d.at || '') || b.id - a.id); }
+async function loadData() {
+  const data = await api('data');
+  $('#adminLinkWrap').hidden = !data.admin;
+  Q = loadQueue(S.name);
+  const { list, prefsBox } = withQueue(data.entries, data.prefs); // keep changes made offline
+  await applyBoxes(prefsBox, list);
+  S.offlineSession = false;
+  saveCache();
+  if (!prefsBox) await savePrefs();
+  flush();
+}
+async function loadOffline(name) {
+  const c = loadCache(name);
+  if (!c) throw new Error('Nothing is saved on this device yet. Sign in once with a connection.');
+  Q = loadQueue(name);
+  const { list, prefsBox } = withQueue(c.entries || [], c.prefs);
+  const probe = prefsBox || list[0];
+  if (!probe) throw new Error('Nothing is saved on this device yet. Sign in once with a connection.');
+  // AES-GCM refuses a wrong key, so this doubles as the passphrase check.
+  try { await open(probe, prefsBox ? 'prefs' : 'entry'); } catch (e) { throw new Error('Wrong passphrase.'); }
+  await applyBoxes(prefsBox, list);
+  S.offlineSession = true;
+  renderSync();
+}
+function enqueue(op) {
+  // At most one pending op per session (and one for prefs); later edits replace earlier ones.
+  if (op.t === 'prefs') Q = Q.filter(o => o.t !== 'prefs');
+  if (op.t === 'save') { const i = Q.findIndex(o => o.t === 'save' && o.id === op.id); if (i >= 0) { Q[i] = op; saveQueue(); return; } }
+  if (op.t === 'delete') { Q = Q.filter(o => !(o.t === 'save' && o.id === op.id)); if (op.id < 0) { saveQueue(); return; } }
+  Q.push(op); saveQueue();
+}
+function remap(tmp, id) {
+  const e = S.entries.find(x => x.id === tmp); if (e) e.id = id;
+  const b = S.boxes.get(tmp); if (b) { S.boxes.delete(tmp); S.boxes.set(id, b); }
+  for (const o of Q) if (o.id === tmp) o.id = id;
+  if (S.editId === tmp) S.editId = id;
+}
+let prefsSeq = 0;
+let flushing = null, flushT;
+async function flushNow() { await flush(); if (Q.length && S.online && S.key) await flush(); } // also catches a flush that was already finishing
+function flushSoon(ms = 300) { clearTimeout(flushT); flushT = setTimeout(() => flush(), ms); }
+function flush() {
+  if (flushing) return flushing;
+  if (!S.key || !Q.length) { renderSync(); return Promise.resolve(); }
+  flushing = (async () => {
+    renderSync(true);
+    let sent = 0;
+    try {
+      while (Q.length && S.key) {
+        const op = Q[0];
+        try {
+          if (op.t === 'save') { const r = await api('save', { iv: op.iv, ct: op.ct, id: op.id > 0 ? op.id : undefined }); if (op.id < 0) remap(op.id, r.id); }
+          else if (op.t === 'delete') await api('delete', { id: op.id });
+          else if (op.t === 'prefs') await api('prefs', { iv: op.iv, ct: op.ct });
+        } catch (x) {
+          if (x.offline || !S.key) throw x;
+          toast(`One change couldn’t be synced: ${x.message}`); // drop it rather than block the queue forever
+        }
+        if (Q[0] === op) Q.shift();
+        sent++; saveQueue();
+      }
+      saveCache();
+      if (sent && S.offlineSession) { S.offlineSession = false; toast('Back online — changes synced'); refresh(); }
+    } catch (x) { /* still offline: try again later */ }
+    finally { flushing = null; renderSync(); }
+  })();
+  return flushing;
+}
+async function refresh() {
+  // Pick up changes made on other devices once we're back online.
+  try {
+    await loadData();
+    if (S.view === 'list') renderList(); else if (S.view === 'stats') renderStats(); else if (!S.editId) renderRecent();
+  } catch (e) { /* stay on the local copy */ }
+}
+function setOnline(v) {
+  if (S.online === v) return;
+  S.online = v; renderSync();
+  if (v && S.key) { if (Q.length) flushSoon(); else if (S.offlineSession) refresh(); }
+}
+function renderSync(busyNow) {
+  const el = $('#syncBadge'); if (!el) return;
+  const n = Q.length;
+  if (!S.key || (S.online && !n)) { el.hidden = true; return; }
+  el.hidden = false;
+  el.classList.toggle('off', !S.online);
+  el.textContent = !S.online ? (n ? `Offline · ${n} to sync` : 'Offline') : (busyNow || flushing ? `Syncing ${n}…` : `${n} to sync`);
+}
+const idOrder = id => (id < 0 ? 1e15 - id : id);
+function sortEntries() { S.entries.sort((a, b) => (b.d.at || '').localeCompare(a.d.at || '') || idOrder(b.id) - idOrder(a.id)); }
 let prefsT;
 function savePrefs(later) {
   clearTimeout(prefsT);
-  const go = async () => { const box = await seal(S.prefs, 'prefs'); await api('prefs', box); };
-  if (later) { prefsT = setTimeout(() => go().catch(e => toast(e.message)), 600); return Promise.resolve(); }
+  const n = ++prefsSeq; // if two saves overlap, only the newest may win
+  const go = async () => { const box = await seal(S.prefs, 'prefs'); if (n !== prefsSeq) return; S.prefsBox = box; enqueue({ t: 'prefs', ...box }); saveCache(); await flushNow(); };
+  // No debounce: the encrypted change is queued on this device straight away, so closing the app can't lose it.
+  if (later) { go().catch(e => toast(e.message)); return Promise.resolve(); }
   return go();
 }
 function listKey(kind) { return kind === 'stakes' && S.type === 'tourney' ? 'buyins' : kind; }
@@ -457,17 +614,22 @@ async function onSave(e) {
   $('#saveBtn').disabled = true;
   try {
     const box = await seal(d, 'entry');
-    const r = await api('save', { ...box, id: S.editId || undefined });
-    const ex = S.entries.find(x => x.id === r.id);
-    if (ex) ex.d = d; else S.entries.push({ id: r.id, d });
+    const id = S.editId || tmpId();
+    S.boxes.set(id, box);
+    const ex = S.entries.find(x => x.id === id);
+    if (ex) ex.d = d; else S.entries.push({ id, d });
     sortEntries();
+    const op = { t: 'save', id, ...box };
+    enqueue(op); saveCache();
+    await flushNow();
+    const queued = Q.includes(op);
     let changed = false;
     changed = bump('locations', d.loc) || changed;
     changed = bump('games', d.game) || changed;
     changed = bump(d.t === 'tourney' ? 'buyins' : 'stakes', d.stakes) || changed;
     if (S.prefs.type !== d.t) { S.prefs.type = d.t; changed = true; }
     if (changed) savePrefs(true);
-    toast(`${S.editId ? 'Updated' : 'Saved'} · ${money(d.res)}`);
+    toast(`${S.editId ? 'Updated' : 'Saved'}${queued ? ' offline' : ''} · ${money(d.res)}`);
     const wasEdit = !!S.editId;
     resetForm();
     if (wasEdit) go('list'); else renderRecent();
@@ -477,9 +639,12 @@ async function onSave(e) {
 async function onDelete() {
   if (!S.editId || !confirm('Delete this session?')) return;
   try {
-    await api('delete', { id: S.editId });
-    S.entries = S.entries.filter(x => x.id !== S.editId);
-    resetForm(); toast('Session deleted'); go('list');
+    const id = S.editId;
+    S.entries = S.entries.filter(x => x.id !== id);
+    S.boxes.delete(id);
+    enqueue({ t: 'delete', id }); saveCache();
+    await flushNow();
+    resetForm(); toast(Q.some(o => o.id === id) ? 'Deleted offline · will sync' : 'Session deleted'); go('list');
   } catch (ex) { $('#formErr').textContent = ex.message; }
 }
 
@@ -788,6 +953,7 @@ function parseCsv(text) {
 async function importCsv(file) {
   const err = $('#setErr'); err.textContent = '';
   try {
+    if (!S.online) throw new Error('Importing needs a connection.');
     const rows = parseCsv(await file.text());
     if (rows.length < 2) throw new Error('The file has no rows.');
     const h = rows[0].map(x => x.trim().toLowerCase());
@@ -811,9 +977,9 @@ async function importCsv(file) {
       const chunk = items.slice(i, i + 1000);
       const boxes = []; for (const d of chunk) boxes.push(await seal(d, 'entry'));
       const r = await api('import', { items: boxes });
-      r.ids.forEach((id, j) => S.entries.push({ id, d: chunk[j] }));
+      r.ids.forEach((id, j) => { S.entries.push({ id, d: chunk[j] }); S.boxes.set(id, boxes[j]); });
     }
-    sortEntries();
+    sortEntries(); saveCache();
     for (const d of items) for (const [k, v] of [['locations', d.loc], ['games', d.game], [d.t === 'tourney' ? 'buyins' : 'stakes', d.stakes]]) if (!S.prefs.lists[k].includes(v)) S.prefs.lists[k].push(v);
     await savePrefs();
     renderListsEditor(); resetForm(); renderRecent();
@@ -831,6 +997,7 @@ async function deleteAccount() {
     const k = await deriveKeys(pass, S.salt, S.iter);
     await api('delete_account', { auth: k.auth });
     const b = bioGet(); if (b && b.name === S.name) bioSet(null);
+    forgetDevice(S.name); Q = [];
     store('pkr.name', null); S.name = '';
     lock('Account deleted.');
   } catch (ex) { err.textContent = ex.message; }
@@ -893,7 +1060,17 @@ function init() {
   document.addEventListener('visibilitychange', () => {
     // If the phone slept past the idle limit, lock as soon as it's visible again.
     if (document.visibilityState === 'visible' && S.key && Date.now() - (activity.at || Date.now()) > IDLE_MS) lock('Signed out after 15 minutes of inactivity.');
+    else if (document.visibilityState === 'visible' && S.key && Q.length) flushSoon();
   });
+  window.addEventListener('online', () => { if (S.key) api('ping').catch(() => {}); });
+  window.addEventListener('offline', () => setOnline(false));
+  // The 'online' event isn't reliable everywhere, so also check every 15 s while there's something to do.
+  setInterval(() => {
+    if (!S.key || flushing) return;
+    if (Q.length) flush();
+    else if (!S.online || S.offlineSession) api('ping').catch(() => {});
+  }, 15000);
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => { /* offline start just won't be available */ });
   window.addEventListener('pointerdown', () => { activity.at = Date.now(); }, { passive: true });
   window.addEventListener('keydown', () => { activity.at = Date.now(); }, { passive: true });
 
