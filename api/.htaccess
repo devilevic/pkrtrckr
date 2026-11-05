@@ -1,0 +1,8 @@
+Options -Indexes
+# Only index.php is reachable; config.php and anything else is blocked.
+<FilesMatch ".*">
+  Require all denied
+</FilesMatch>
+<Files "index.php">
+  Require all granted
+</Files>
