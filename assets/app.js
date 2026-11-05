@@ -570,6 +570,7 @@ function resetForm() {
   ['locations', 'games', 'stakes'].forEach(k => fillSelect(k, ''));
   $('#fHU').checked = false;
   $('#fMinutes').value = ''; $('#fAmount').value = ''; setSign(1);
+  $('#fNote').value = ''; noteInput();
   $('#fWhen').value = localISO(new Date());
   $('.more').open = false;
   $('#formErr').textContent = '';
@@ -589,6 +590,7 @@ function editEntry(id) {
   $('#fHU').checked = !!d.hu;
   $('#fMinutes').value = d.min; setSign(d.res < 0 ? -1 : 1); $('#fAmount').value = Math.abs(d.res);
   $('#fWhen').value = d.at; $('.more').open = true;
+  $('#fNote').value = d.note || ''; noteInput();
   minutesHint(); whenSummary();
   $('#recentBox').innerHTML = '';
 }
@@ -603,6 +605,8 @@ async function onSave(e) {
     min: parseInt($('#fMinutes').value, 10),
     res: Math.round(S.sign * parseFloat(String($('#fAmount').value).replace(',', '.')) * 100) / 100,
   };
+  const note = $('#fNote').value.trim().slice(0, 2000);
+  if (note) d.note = note;
   const label = S.type === 'tourney' ? 'buy-in' : 'stakes';
   if (!d.loc) return void (err.textContent = 'Add a location with +.');
   if (!d.game) return void (err.textContent = 'Add a game with +.');
@@ -655,15 +659,31 @@ function sessItem(e) {
     <span class="l1">${esc(d.loc)}${d.hu ? '<span class="badge hu">HU</span>' : ''}${d.t === 'tourney' ? '<span class="badge">MTT</span>' : ''}</span>
     <span class="amt ${cls(d.res)}">${money(d.res)}<small>${hm(d.min)}</small></span>
     <span class="l2">${esc(dateLabel(at))} · ${esc(d.game)} · ${esc(d.stakes)}</span>
+    ${d.note ? `<span class="l3"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M3 2.5h10v8l-3 3H3z M10 13.5v-3h3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg><span>${esc(d.note.replace(/\s+/g, ' '))}</span></span>` : ''}
   </button></li>`;
 }
+function noteInput() {
+  const el = $('#fNote'), n = el.value.length;
+  el.style.height = 'auto'; el.style.height = Math.min(320, el.scrollHeight + 2) + 'px'; // grow with the text
+  $('#noteCount').textContent = n > 1700 ? `${n} / 2000` : '';
+}
+function matches(d, q) {
+  return [d.loc, d.game, d.stakes, d.note, d.t === 'tourney' ? 'tournament mtt' : 'cash', d.hu ? 'hu heads-up' : '']
+    .some(v => v && v.toLowerCase().includes(q));
+}
 function renderList() {
-  const n = S.entries.length;
+  const q = $('#listSearch').value.trim().toLowerCase();
+  const all = S.entries.length;
+  const list = q ? S.entries.filter(e => matches(e.d, q)) : S.entries;
+  const n = list.length;
   const pages = Math.max(1, Math.ceil(n / PAGE));
   S.page = Math.min(Math.max(0, S.page), pages - 1);
-  const slice = S.entries.slice(S.page * PAGE, S.page * PAGE + PAGE);
-  $('#listCount').textContent = n ? `${n} total` : '';
-  $('#sessionList').innerHTML = n ? slice.map(sessItem).join('') : '<li class="empty">No sessions yet. Add your first one from the Add tab.</li>';
+  const slice = list.slice(S.page * PAGE, S.page * PAGE + PAGE);
+  $('#listSearch').hidden = !all;
+  $('#listCount').textContent = !all ? '' : q ? `${n} of ${all}` : `${all} total`;
+  $('#sessionList').innerHTML = n ? slice.map(sessItem).join('')
+    : q ? '<li class="empty">No sessions match your search.</li>'
+    : '<li class="empty">No sessions yet. Add your first one from the Add tab.</li>';
   $('#pager').hidden = n <= PAGE;
   $('#pageInfo').textContent = `${S.page * PAGE + 1}–${Math.min(n, S.page * PAGE + PAGE)} of ${n}`;
   $('#prevPage').disabled = S.page === 0;
@@ -929,8 +949,8 @@ function csvCell(v) {
   return /[",;\n\r]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
 }
 function exportCsv() {
-  const rows = [['date', 'type', 'location', 'game', 'stakes', 'hu', 'minutes', 'result']];
-  [...S.entries].reverse().forEach(({ d }) => rows.push([d.at.replace('T', ' '), d.t === 'tourney' ? 'tournament' : 'cash', d.loc, d.game, d.stakes, d.hu ? 1 : 0, d.min, d.res]));
+  const rows = [['date', 'type', 'location', 'game', 'stakes', 'hu', 'minutes', 'result', 'note']];
+  [...S.entries].reverse().forEach(({ d }) => rows.push([d.at.replace('T', ' '), d.t === 'tourney' ? 'tournament' : 'cash', d.loc, d.game, d.stakes, d.hu ? 1 : 0, d.min, d.res, d.note || '']));
   const blob = new Blob(['﻿' + rows.map(r => r.map(csvCell).join(',')).join('\r\n')], { type: 'text/csv' });
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
   a.download = `pkrtrckr-${localISO(new Date()).slice(0, 10)}.csv`; document.body.appendChild(a); a.click(); a.remove();
@@ -958,7 +978,7 @@ async function importCsv(file) {
     if (rows.length < 2) throw new Error('The file has no rows.');
     const h = rows[0].map(x => x.trim().toLowerCase());
     const col = (...names) => h.findIndex(x => names.includes(x));
-    const C = { at: col('date', 'datetime', 'start', 'end'), t: col('type', 'format'), loc: col('location', 'venue', 'place'), game: col('game'), stakes: col('stakes', 'limit', 'buyin', 'buy-in'), hu: col('hu', 'headsup', 'heads-up'), min: col('minutes', 'duration', 'mins'), res: col('result', 'profit', 'net', 'amount') };
+    const C = { at: col('date', 'datetime', 'start', 'end'), t: col('type', 'format'), loc: col('location', 'venue', 'place'), game: col('game'), stakes: col('stakes', 'limit', 'buyin', 'buy-in'), hu: col('hu', 'headsup', 'heads-up'), min: col('minutes', 'duration', 'mins'), res: col('result', 'profit', 'net', 'amount'), note: col('note', 'notes', 'comment', 'comments') };
     if (C.at < 0 || C.min < 0 || C.res < 0) throw new Error('Need at least these columns: date, minutes, result.');
     const items = [];
     for (const r of rows.slice(1)) {
@@ -968,7 +988,9 @@ async function importCsv(file) {
       const min = parseInt(g('min'), 10);
       if (isNaN(at) || isNaN(res) || !(min > 0)) continue;
       const t = /tour|mtt|sng|sit/i.test(g('t')) ? 'tourney' : 'cash';
-      items.push({ t, at: localISO(at), loc: g('loc') || 'Unknown', game: g('game') || 'Unknown', stakes: g('stakes') || '?', hu: /^(1|true|yes|y|hu|x)$/i.test(g('hu')), min, res: Math.round(res * 100) / 100 });
+      const it = { t, at: localISO(at), loc: g('loc') || 'Unknown', game: g('game') || 'Unknown', stakes: g('stakes') || '?', hu: /^(1|true|yes|y|hu|x)$/i.test(g('hu')), min, res: Math.round(res * 100) / 100 };
+      const note = g('note').slice(0, 2000); if (note) it.note = note;
+      items.push(it);
     }
     if (!items.length) throw new Error('No valid rows found.');
     if (!confirm(`Import ${items.length} session${items.length === 1 ? '' : 's'}?`)) return;
@@ -1027,6 +1049,8 @@ function init() {
     $('.add-row input', c).addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addToList(c); } if (e.key === 'Escape') toggleAdd(c, false); });
   });
   $('#fMinutes').addEventListener('input', minutesHint);
+  $('#fNote').addEventListener('input', noteInput);
+  let st; $('#listSearch').addEventListener('input', () => { clearTimeout(st); st = setTimeout(() => { S.page = 0; renderList(); }, 120); });
   $('#fWhen').addEventListener('input', whenSummary);
   $('#fAmount').addEventListener('input', e => { const v = e.target.value; if (v.startsWith('-')) { e.target.value = v.slice(1); setSign(-1); } });
   $('#entryForm').addEventListener('submit', onSave);

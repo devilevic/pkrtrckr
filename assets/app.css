@@ -363,3 +363,21 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
   white-space: nowrap;
 }
 .sync.off { background: var(--warn-bg); color: var(--text); border-color: var(--warn-line); }
+
+/* ---------- notes ---------- */
+textarea {
+  width: 100%; min-height: 48px; padding: 12px 14px; resize: none; line-height: 1.45;
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-sm); outline: none;
+  font: inherit; color: inherit;
+}
+textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.field > span small { font-weight: 400; }
+.hint.right { text-align: right; }
+.hint.right:empty { display: none; }
+.sess .l3 {
+  grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; margin-top: 4px;
+  font-size: 13px; color: var(--text-2); overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.sess .l3 svg { flex: none; color: var(--muted); }
+.sess .l3 span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.list-search { margin: 0 0 12px; min-height: 42px; font-size: 15px; }

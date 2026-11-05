@@ -16,8 +16,8 @@
 <link rel="icon" href="assets/favicon-16.png" type="image/png" sizes="16x16">
 <link rel="apple-touch-icon" href="assets/icon-180.png">
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="stylesheet" href="assets/app.css?v=5">
-<script src="assets/app.js?v=5" defer></script>
+<link rel="stylesheet" href="assets/app.css?v=6">
+<script src="assets/app.js?v=6" defer></script>
 </head>
 <body>
 
@@ -142,6 +142,12 @@
         </div>
       </div>
 
+      <label class="field">
+        <span>Notes <small class="muted">optional · encrypted</small></span>
+        <textarea id="fNote" rows="2" maxlength="2000" placeholder="Table dynamics, key hands, reads…"></textarea>
+        <small class="hint right" id="noteCount"></small>
+      </label>
+
       <details class="more">
         <summary>Date &amp; time <span id="whenSummary"></span></summary>
         <label class="field"><span>Ended at</span><input id="fWhen" type="datetime-local"></label>
@@ -163,6 +169,7 @@
       <h2 class="view-title">Sessions</h2>
       <span class="muted" id="listCount"></span>
     </div>
+    <input type="search" id="listSearch" class="list-search" placeholder="Search notes, locations, games, stakes" autocomplete="off" enterkeyhint="search">
     <ul class="sessions" id="sessionList"></ul>
     <nav class="pager" id="pager" aria-label="Pages">
       <button class="icon-btn" id="prevPage" aria-label="Newer sessions">‹</button>
@@ -249,7 +256,7 @@
       <button type="button" class="btn sm" id="exportCsv">Export CSV</button>
       <label class="btn sm file-btn">Import CSV<input type="file" id="importCsv" accept=".csv,text/csv"></label>
     </div>
-    <p class="muted small">CSV columns: date, type, location, game, stakes, hu, minutes, result. Export is decrypted on your device — keep the file somewhere safe.</p>
+    <p class="muted small">CSV columns: date, type, location, game, stakes, hu, minutes, result, note. Export is decrypted on your device — keep the file somewhere safe.</p>
     <p class="err" id="setErr" role="alert"></p>
     <p id="adminLinkWrap" hidden><a class="btn sm" href="admin.html">Open admin dashboard</a></p>
     <div class="row-btns spread">

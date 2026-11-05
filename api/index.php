@@ -216,7 +216,7 @@ case 'data': {
 case 'save': {
     $id = uid();
     $iv = b64($in['iv'] ?? '', 16, 24);
-    $ct = b64($in['ct'] ?? '', 16, 8000);
+    $ct = b64($in['ct'] ?? '', 16, 16000);
     $eid = (int)($in['id'] ?? 0);
     if ($eid) {
         $s = q('UPDATE entries SET iv = ?, ct = ?, updated_at = ? WHERE id = ? AND user_id = ?', [$iv, $ct, time(), $eid, $id]);
@@ -240,7 +240,7 @@ case 'import': {
     $st = db()->prepare('INSERT INTO entries (user_id, iv, ct, created_at, updated_at) VALUES (?, ?, ?, ?, ?)');
     foreach ($items as $it) {
         if (!is_array($it)) { db()->rollBack(); fail('Bad payload'); }
-        $st->execute([$id, b64($it['iv'] ?? '', 16, 24), b64($it['ct'] ?? '', 16, 8000), time(), time()]);
+        $st->execute([$id, b64($it['iv'] ?? '', 16, 24), b64($it['ct'] ?? '', 16, 16000), time(), time()]);
         $ids[] = (int)db()->lastInsertId();
     }
     db()->commit();
