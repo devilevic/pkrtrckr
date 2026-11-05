@@ -21,6 +21,7 @@ const S = {
   prefs: null,
   view: 'add', page: 0, type: 'cash', sign: 1, editId: 0,
   bdDim: 'stakes',
+  cal: { mode: 'month', y: null, mo: 0, sel: null },
 };
 
 /* ================= utils ================= */
@@ -776,10 +777,29 @@ function renderStats() {
     <div class="card"><h3>Cumulative result</h3><p class="cap">${esc(span)}</p><div class="chart" id="chCum"></div></div>
     <div class="card"><h3 id="perTitle">Results by month</h3><p class="cap">Net per period. Tap a bar for details.</p><div class="chart" id="chPer"></div>
       <div class="legend"><span><i class="lg-pos"></i>Won</span><span><i class="lg-neg"></i>Lost</span></div></div>
+    <div class="card" id="calCard">
+      <div class="cal-head"><h3>Calendar</h3>
+        <div class="seg compact" id="calMode" role="radiogroup" aria-label="Calendar view"><button type="button" role="radio" data-m="month">Month</button><button type="button" role="radio" data-m="year">Year</button></div></div>
+      <div class="cal-nav"><button type="button" class="icon-btn" id="calPrev" aria-label="Previous">‹</button><div><div id="calTitle"></div><div class="cap" id="calSum"></div></div><button type="button" class="icon-btn" id="calNext" aria-label="Next">›</button></div>
+      <div id="calBody"></div>
+      <div class="cal-legend" aria-hidden="true"><span>Lost</span><i class="n4"></i><i class="n3"></i><i class="n2"></i><i class="n1"></i><i class="even"></i><i class="p1"></i><i class="p2"></i><i class="p3"></i><i class="p4"></i><span>Won</span></div>
+      <div id="calDay" class="cal-day"></div>
+    </div>
     <div class="card"><h3>Breakdown</h3><p class="cap">Sorted by hours played.</p>
       <div class="bd-tabs" id="bdTabs">${Object.entries(BD).map(([k, v]) => `<button type="button" data-k="${k}" aria-pressed="${k === S.bdDim}">${v.label}</button>`).join('')}</div>
       <div id="bdTable"></div></div>`;
-  drawCum(L); drawPeriods(L); drawBreakdown(L);
+  renderStats.last = L;
+  drawCum(L); drawPeriods(L); drawBreakdown(L); drawCal(L);
+  $('#calPrev').onclick = () => calNav(-1);
+  $('#calNext').onclick = () => calNav(1);
+  $('#calMode').onclick = e => { const b = e.target.closest('button'); if (!b || b.dataset.m === S.cal.mode) return; S.cal.mode = b.dataset.m; S.cal.sel = null; drawCal(L); };
+  $('#calBody').onclick = e => {
+    const d = e.target.closest('.cal-d[data-k]');
+    if (d) { S.cal.sel = S.cal.sel === d.dataset.k ? null : d.dataset.k; drawCal(L); if (S.cal.sel) $('#calDay').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); return; }
+    const mm = e.target.closest('.cal-mini');
+    if (mm) { S.cal.mode = 'month'; S.cal.mo = +mm.dataset.mo; S.cal.sel = null; drawCal(L); }
+  };
+  $('#calDay').onclick = e => { const b = e.target.closest('.sess'); if (b) editEntry(+b.dataset.id); };
   $('#bdTabs').onclick = e => { const b = e.target.closest('button'); if (!b) return; S.bdDim = b.dataset.k; $$('#bdTabs button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); drawBreakdown(L); };
   renderStats.last = L;
 }
@@ -793,6 +813,112 @@ const BD = {
   wd: { label: 'Weekday', key: d => WD[(parseAt(d.at).getDay() + 6) % 7], order: WD },
   len: { label: 'Length', key: d => d.min < 120 ? 'Under 2 h' : d.min < 240 ? '2–4 h' : d.min < 480 ? '4–8 h' : '8 h +', order: ['Under 2 h', '2–4 h', '4–8 h', '8 h +'] },
 };
+/* ---------- results calendar ----------
+ * Each day is shaded by its net result: blue for winning days, red for losing days, darker =
+ * bigger. The scale is relative to your own big days (90th percentile), so a few huge
+ * days don't wash everything else out. The amount is always printed too, so colour is never
+ * the only cue. */
+function dayKey(dt) { return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`; }
+function calDays(L) {
+  const m = new Map();
+  for (const d of L) {
+    const k = (d.at || '').slice(0, 10);
+    if (!m.has(k)) m.set(k, { net: 0, min: 0, n: 0 });
+    const x = m.get(k); x.net += d.res; x.min += d.min; x.n++;
+  }
+  const abs = [...m.values()].map(x => Math.abs(x.net)).filter(Boolean).sort((a, b) => a - b);
+  const ref = abs.length ? abs[Math.min(abs.length - 1, Math.floor(abs.length * 0.9))] : 1;
+  return { m, ref: ref || 1 };
+}
+function calLevel(net, ref) {
+  if (!net) return 'even';
+  const lv = Math.max(1, Math.min(4, Math.ceil(Math.sqrt(Math.abs(net) / ref) * 4))); // sqrt spreads the many small days
+  return `${net > 0 ? 'p' : 'n'}${lv}`;
+}
+function shortAmt(n) {
+  const a = Math.abs(n), s = n > 0 ? '+' : n < 0 ? '−' : '';
+  if (a >= 10000) return s + Math.round(a / 1000) + 'k';
+  if (a >= 1000) return s + (a / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
+  return s + Math.round(a);
+}
+const WD_SHORT = [...Array(7)].map((_, i) => new Date(2024, 0, 1 + i).toLocaleDateString(undefined, { weekday: 'narrow' }));
+function monthCells(y, mo) {
+  const first = new Date(y, mo, 1), days = new Date(y, mo + 1, 0).getDate();
+  const lead = (first.getDay() + 6) % 7; // Monday first
+  return { lead, days };
+}
+function drawCal(L) {
+  const card = $('#calCard'); if (!card) return;
+  const { m, ref } = calDays(L);
+  const keys = [...m.keys()].sort();
+  const C = S.cal;
+  const firstK = keys[0], lastK = keys[keys.length - 1];
+  const ym = k => [+k.slice(0, 4), +k.slice(5, 7) - 1];
+  const [fy, fm] = ym(firstK), [ly, lm] = ym(lastK);
+  const idx = (y, mo) => y * 12 + mo;
+  // Start on the latest month with data; keep the user's place while it's still in range.
+  if (C.y == null || idx(C.y, C.mo) > idx(ly, lm) || idx(C.y, C.mo) < idx(fy, fm)) { C.y = ly; C.mo = lm; C.sel = null; }
+  if (C.mode === 'year' && (C.y < fy || C.y > ly)) C.y = ly;
+  $$('#calMode button').forEach(b => b.setAttribute('aria-checked', String(b.dataset.m === C.mode)));
+  const today = dayKey(new Date());
+  let html = '';
+  if (C.mode === 'month') {
+    const { lead, days } = monthCells(C.y, C.mo);
+    let net = 0, played = 0, won = 0;
+    for (let d = 1; d <= days; d++) { const x = m.get(`${C.y}-${pad(C.mo + 1)}-${pad(d)}`); if (x) { net += x.net; played++; if (x.net > 0) won++; } }
+    $('#calTitle').textContent = new Date(C.y, C.mo, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+    $('#calSum').innerHTML = played ? `<span class="${cls(net)}">${money(net)}</span> · ${played} day${played === 1 ? '' : 's'} played · ${won} winning` : 'No sessions this month';
+    $('#calPrev').disabled = idx(C.y, C.mo) <= idx(fy, fm);
+    $('#calNext').disabled = idx(C.y, C.mo) >= idx(ly, lm);
+    html += `<div class="cal-grid">${WD_SHORT.map(w => `<span class="cal-wd">${esc(w)}</span>`).join('')}`;
+    for (let i = 0; i < lead; i++) html += '<span></span>';
+    for (let d = 1; d <= days; d++) {
+      const k = `${C.y}-${pad(C.mo + 1)}-${pad(d)}`, x = m.get(k);
+      const label = x ? `${dateLabel(parseAt(k), true)}: ${money(x.net)}, ${x.n} session${x.n === 1 ? '' : 's'}` : dateLabel(parseAt(k), true);
+      html += x
+        ? `<button type="button" class="cal-d ${calLevel(x.net, ref)}${k === C.sel ? ' sel' : ''}${k === today ? ' today' : ''}" data-k="${k}" aria-label="${esc(label)}"><b>${d}</b><span>${shortAmt(x.net)}</span></button>`
+        : `<span class="cal-d blank${k === today ? ' today' : ''}" aria-label="${esc(label)}"><b>${d}</b></span>`;
+    }
+    html += '</div>';
+  } else {
+    let net = 0, played = 0, won = 0;
+    for (const [k, x] of m) if (+k.slice(0, 4) === C.y) { net += x.net; played++; if (x.net > 0) won++; }
+    $('#calTitle').textContent = String(C.y);
+    $('#calSum').innerHTML = played ? `<span class="${cls(net)}">${money(net)}</span> · ${played} day${played === 1 ? '' : 's'} played · ${won} winning` : 'No sessions this year';
+    $('#calPrev').disabled = C.y <= fy;
+    $('#calNext').disabled = C.y >= ly;
+    html += '<div class="cal-year">';
+    for (let mo = 0; mo < 12; mo++) {
+      const { lead, days } = monthCells(C.y, mo);
+      let mnet = 0, mplayed = 0, cells = '';
+      for (let i = 0; i < lead; i++) cells += '<i></i>';
+      for (let d = 1; d <= days; d++) {
+        const x = m.get(`${C.y}-${pad(mo + 1)}-${pad(d)}`);
+        if (x) { mnet += x.net; mplayed++; }
+        cells += `<i class="${x ? calLevel(x.net, ref) : 'blank'}"></i>`;
+      }
+      const name = new Date(C.y, mo, 1).toLocaleDateString(undefined, { month: 'short' });
+      html += `<button type="button" class="cal-mini" data-mo="${mo}" ${mplayed ? '' : 'disabled'} aria-label="${esc(name)}${mplayed ? ': ' + esc(money(mnet)) : ''}">
+        <span class="cal-mini-h"><b>${esc(name)}</b><span class="${cls(mnet)}">${mplayed ? shortAmt(mnet) : ''}</span></span><span class="cal-mini-g">${cells}</span></button>`;
+    }
+    html += '</div>';
+  }
+  $('#calBody').innerHTML = html;
+  // Sessions of the selected day
+  const box = $('#calDay');
+  if (C.mode === 'month' && C.sel && m.has(C.sel)) {
+    const list = S.entries.filter(e => L.includes(e.d) && (e.d.at || '').startsWith(C.sel));
+    const x = m.get(C.sel);
+    box.innerHTML = `<h4>${esc(dateLabel(parseAt(C.sel), true))} · <span class="${cls(x.net)}">${money(x.net)}</span> · ${hm(x.min)}</h4><ul class="sessions">${list.map(sessItem).join('')}</ul>`;
+  } else box.innerHTML = '';
+}
+function calNav(step) {
+  const C = S.cal;
+  if (C.mode === 'year') C.y += step;
+  else { const t = C.y * 12 + C.mo + step; C.y = Math.floor(t / 12); C.mo = t % 12; }
+  C.sel = null;
+  drawCal(renderStats.last);
+}
 function drawBreakdown(L) {
   const dim = BD[S.bdDim]; const g = new Map();
   for (const d of L) { const k = dim.key(d); if (!g.has(k)) g.set(k, []); g.get(k).push(d); }
