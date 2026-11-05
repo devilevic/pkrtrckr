@@ -37,5 +37,6 @@ jobs:
             .cpanel.yml
             README.md
             schema.sql
+            migrations/**
             api/config.example.php
             **/.DS_Store

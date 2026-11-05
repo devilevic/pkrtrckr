@@ -11,6 +11,9 @@ CREATE TABLE IF NOT EXISTS users (
   auth_hash     VARCHAR(255) NOT NULL,          -- password_hash() of the client-derived auth key
   prefs_iv      VARCHAR(32)  NULL,              -- encrypted settings + dropdown lists
   prefs_ct      MEDIUMTEXT   NULL,
+  last_login_at INT UNSIGNED NOT NULL DEFAULT 0,
+  last_seen_at  INT UNSIGNED NOT NULL DEFAULT 0,
+  login_count   INT UNSIGNED NOT NULL DEFAULT 0,
   failed_logins INT UNSIGNED NOT NULL DEFAULT 0,
   locked_until  INT UNSIGNED NOT NULL DEFAULT 0,
   created_at    INT UNSIGNED NOT NULL,
@@ -34,4 +37,13 @@ CREATE TABLE IF NOT EXISTS attempts (
   ip    VARCHAR(64)  NOT NULL,                  -- hashed IP, never the raw address
   ts    INT UNSIGNED NOT NULL,
   KEY idx_kind_ip_ts (kind, ip, ts)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Admin dashboard: one row per user per day they used the app (dates only).
+CREATE TABLE IF NOT EXISTS activity (
+  user_id INT UNSIGNED NOT NULL,
+  day     INT UNSIGNED NOT NULL,              -- YYYYMMDD in the server's timezone
+  PRIMARY KEY (user_id, day),
+  KEY idx_day (day),
+  CONSTRAINT fk_activity_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

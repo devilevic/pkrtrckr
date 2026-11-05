@@ -9,7 +9,7 @@ DirectoryIndex index.html
   RewriteCond %{HTTP:X-Forwarded-Proto} !=https
   RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
   # Never serve these
-  RewriteRule ^(schema\.sql|README\.md|\.ftp-deploy-sync-state\.json)$ - [F,L]
+  RewriteRule ^(schema\.sql|README\.md|\.ftp-deploy-sync-state\.json|migrations/.*)$ - [F,L]
 </IfModule>
 
 <IfModule mod_headers.c>

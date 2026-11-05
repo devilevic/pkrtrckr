@@ -15,6 +15,12 @@ return [
     // Keep it stable once people have signed up.
     'secret'  => 'CHANGE-ME-TO-64-RANDOM-HEX-CHARACTERS',
 
+    // Account names (lowercase) allowed to open /admin.html — sign up in the app first.
+    'admin_users' => ['your-name'],
+
+    // Used for "today" and daily counts on the admin dashboard.
+    'timezone' => 'Europe/Amsterdam',
+
     // Sign out after this many seconds without activity.
     'idle_timeout' => 15 * 60,
 

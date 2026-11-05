@@ -43,9 +43,23 @@ assets/icon*.{svg,png}
 api/index.php         the API (prelogin, signup, login, logout, data, save, import, delete, prefs, delete_account)
 api/config.php        database credentials (git-ignored, blocked from the web)
 api/config.example.php  template for config.php
+admin.html, assets/admin.*  admin dashboard
+migrations/           database changes for existing installs (run once in phpMyAdmin)
 .htaccess             HTTPS redirect, security headers, CSP
 schema.sql            database tables — import once, don't upload
 ```
 
 ## Updating later
 When you change `app.js` or `app.css`, bump `?v=1` to `?v=2` in `index.html` so phones load the new version.
+
+## Admin dashboard
+`https://pkrtrckr.com/admin.html` shows sign-ups, daily active users, sessions logged and a user list.
+It only sees names, dates and counts — session contents are encrypted and unreadable on the server.
+
+Setup (once):
+1. phpMyAdmin > your database > SQL tab: paste and run `migrations/001-admin-dashboard.sql`.
+2. In the server's `api/config.php` (cPanel File Manager), add your account name:
+   `'admin_users' => ['yourname'],`
+3. Open `/admin.html` and sign in with that account. Admins also get a link under Settings in the app.
+
+Active-user counts start from the day the migration is run; sign-ups and sessions logged include history.

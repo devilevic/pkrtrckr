@@ -1,0 +1,19 @@
+/* pkrtrckr admin dashboard (extends app.css) */
+.dash { max-width: 960px; margin: 0 auto; padding: 0 16px calc(32px + env(safe-area-inset-bottom)); }
+.top-actions { display: flex; gap: 6px; }
+.top-actions .btn { text-decoration: none; color: var(--text); }
+#updated { margin: 0 0 14px; }
+.tiles.wide { grid-template-columns: repeat(2, 1fr); }
+@media (min-width: 560px) { .tiles.wide { grid-template-columns: repeat(3, 1fr); } }
+@media (min-width: 860px) { .tiles.wide { grid-template-columns: repeat(4, 1fr); } }
+.tile .v.big { font-size: 28px; }
+.range { max-width: 260px; }
+.chart .bar { fill: var(--chart-pos); }
+.users-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 2px; }
+.users-head input { max-width: 200px; min-height: 38px; font-size: 14px; padding: 6px 12px; }
+.table-wrap { overflow-x: auto; margin: 0 -14px; padding: 0 14px; }
+table.users td:first-child { max-width: none; }
+table.users td { font-weight: 400; }
+table.users .dim { color: var(--muted); }
+.fine a { color: var(--text-2); }
+.empty-row td { text-align: center !important; color: var(--muted); padding: 20px 0; }

@@ -175,6 +175,7 @@ function defaultPrefs() {
 }
 async function loadData() {
   const data = await api('data');
+  $('#adminLinkWrap').hidden = !data.admin;
   S.prefs = data.prefs ? { ...defaultPrefs(), ...(await open(data.prefs, 'prefs')) } : defaultPrefs();
   for (const k of Object.keys(LISTS)) if (!Array.isArray(S.prefs.lists[k])) S.prefs.lists[k] = [];
   const out = [];

@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>pkrtrckr — dashboard</title>
+<meta name="theme-color" content="#11151a" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f5f6f3" media="(prefers-color-scheme: light)">
+<link rel="icon" href="favicon.ico" sizes="48x48">
+<link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="assets/app.css?v=3">
+<link rel="stylesheet" href="assets/admin.css?v=1">
+<script src="assets/admin.js?v=1" defer></script>
+</head>
+<body>
+
+<main id="auth" class="auth" hidden>
+  <div class="auth-card">
+    <div class="brand"><img src="assets/icon.svg" alt="" width="44" height="44"><h1>Dashboard</h1></div>
+    <p class="tag">Sign in with your pkrtrckr admin account.</p>
+    <form id="authForm" novalidate>
+      <label class="field"><span>Name</span><input id="authName" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="32"></label>
+      <label class="field"><span>Passphrase</span><input id="authPass" type="password" autocomplete="current-password"></label>
+      <p class="err" id="authErr" role="alert"></p>
+      <button class="btn primary block" id="authBtn" type="submit">Sign in</button>
+    </form>
+    <p class="fine"><a href="./">← Back to the app</a></p>
+  </div>
+</main>
+
+<div id="dash" class="dash" hidden>
+  <header class="top">
+    <div class="brand sm"><img src="assets/icon.svg" alt="" width="26" height="26"><span>pkrtrckr <span class="muted">dashboard</span></span></div>
+    <div class="top-actions">
+      <button class="btn sm ghost" id="refreshBtn" type="button">Refresh</button>
+      <a class="btn sm ghost" href="./">App</a>
+    </div>
+  </header>
+  <p class="muted small" id="updated"></p>
+
+  <section class="tiles wide" id="tiles"></section>
+
+  <div class="range seg" id="rangeSeg" role="radiogroup" aria-label="Range">
+    <button type="button" role="radio" data-days="30" aria-checked="true">30 days</button>
+    <button type="button" role="radio" data-days="90" aria-checked="false">90 days</button>
+  </div>
+
+  <div class="card"><h3>Active users per day</h3><p class="cap">People who opened the app that day. Counted since the dashboard was added.</p><div class="chart" id="chActive"></div></div>
+  <div class="card"><h3>Sign-ups per day</h3><p class="cap">New accounts.</p><div class="chart" id="chSignups"></div></div>
+  <div class="card"><h3>Sessions logged per day</h3><p class="cap">Poker sessions saved or imported.</p><div class="chart" id="chEntries"></div></div>
+
+  <div class="card">
+    <div class="users-head"><h3>Users</h3><input id="userSearch" type="search" placeholder="Search names" autocomplete="off"></div>
+    <p class="cap">Sorted by last active. Only names, dates and counts — session contents are encrypted and never visible here.</p>
+    <div class="table-wrap"><table class="bd users" id="usersTable"></table></div>
+  </div>
+</div>
+
+<div class="busy" id="busy" hidden><div class="spinner"></div><p id="busyMsg"></p></div>
+</body>
+</html>

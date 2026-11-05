@@ -7,6 +7,7 @@
 declare(strict_types=1);
 
 $CFG = require __DIR__ . '/config.php';
+date_default_timezone_set($CFG['timezone'] ?? 'Europe/Amsterdam');
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
@@ -64,12 +65,45 @@ function uid(): int {
         fail('Signed out', 401);
     }
     $_SESSION['seen'] = time();
+    track($id);
     return $id;
 }
 function sign_in(int $id): void {
     session_regenerate_id(true);
     $_SESSION['uid'] = $id;
     $_SESSION['seen'] = time();
+    track($id, true);
+}
+
+// Usage metadata for the admin dashboard: last seen, login count, and one row per active day.
+// Only dates and counts — session contents are encrypted and unreadable here.
+// Wrapped so a missing migration can never break the app.
+function track(int $id, bool $login = false): void {
+    try {
+        $now = time();
+        if ($login) {
+            q('UPDATE users SET last_login_at = ?, last_seen_at = ?, login_count = login_count + 1 WHERE id = ?', [$now, $now, $id]);
+        } elseif ($now - (int)($_SESSION['tracked'] ?? 0) > 300) {
+            q('UPDATE users SET last_seen_at = ? WHERE id = ?', [$now, $id]);
+        } else {
+            return;
+        }
+        $_SESSION['tracked'] = $now;
+        $day = (int)date('Ymd', $now);
+        if ((int)($_SESSION['act_day'] ?? 0) !== $day) {
+            try { q('INSERT INTO activity (user_id, day) VALUES (?, ?)', [$id, $day]); } catch (PDOException $e) { /* already counted today */ }
+            $_SESSION['act_day'] = $day;
+        }
+    } catch (Throwable $e) {
+        // tracking is best-effort
+    }
+}
+function is_admin(int $id): bool {
+    global $CFG;
+    $admins = array_map('strtolower', (array)($CFG['admin_users'] ?? []));
+    if (!$admins) return false;
+    $name = q('SELECT username FROM users WHERE id = ?', [$id])->fetchColumn();
+    return $name !== false && in_array($name, $admins, true);
 }
 
 // ---- validation ----------------------------------------------------------
@@ -175,6 +209,7 @@ case 'data': {
     out([
         'prefs' => ($u && $u['prefs_ct']) ? ['iv' => $u['prefs_iv'], 'ct' => $u['prefs_ct']] : null,
         'entries' => $rows,
+        'admin' => is_admin($id),
     ]);
 }
 
@@ -230,10 +265,52 @@ case 'delete_account': {
     $row = q('SELECT auth_hash FROM users WHERE id = ?', [$id])->fetch();
     if (!$row || !password_verify($auth, $row['auth_hash'])) fail('Wrong passphrase.', 401);
     q('DELETE FROM entries WHERE user_id = ?', [$id]);
+    try { q('DELETE FROM activity WHERE user_id = ?', [$id]); } catch (PDOException $e) { /* table not migrated yet */ }
     q('DELETE FROM users WHERE id = ?', [$id]);
     $_SESSION = [];
     session_destroy();
     out(['ok' => true]);
+}
+
+case 'admin_stats': {
+    $id = uid();
+    if (!is_admin($id)) fail('Not found', 404);
+    try {
+        $c = fn(string $sql, array $p = []): int => (int)q($sql, $p)->fetchColumn();
+        $today = strtotime('today');
+        $since = fn(int $days): int => strtotime('-' . ($days - 1) . ' days', $today);
+        $dayInt = fn(int $ts): int => (int)date('Ymd', $ts);
+        $t = [
+            'users'              => $c('SELECT COUNT(*) FROM users'),
+            'users_with_entries' => $c('SELECT COUNT(DISTINCT user_id) FROM entries'),
+            'entries'            => $c('SELECT COUNT(*) FROM entries'),
+        ];
+        foreach ([1, 7, 30] as $d) {
+            $t["signups_$d"] = $c('SELECT COUNT(*) FROM users WHERE created_at >= ?', [$since($d)]);
+            $t["active_$d"]  = $c('SELECT COUNT(DISTINCT user_id) FROM activity WHERE day >= ?', [$dayInt($since($d))]);
+            $t["entries_$d"] = $c('SELECT COUNT(*) FROM entries WHERE created_at >= ?', [$since($d)]);
+        }
+        // Daily series for the last 90 days (bucketed in PHP so the SQL stays portable).
+        $from = $since(90);
+        $days = [];
+        for ($ts = $from; $ts <= $today; $ts = strtotime('+1 day', $ts)) $days[date('Y-m-d', $ts)] = ['signups' => 0, 'active' => 0, 'entries' => 0];
+        foreach (q('SELECT created_at FROM users WHERE created_at >= ?', [$from])->fetchAll(PDO::FETCH_COLUMN) as $ts) { $k = date('Y-m-d', (int)$ts); if (isset($days[$k])) $days[$k]['signups']++; }
+        foreach (q('SELECT created_at FROM entries WHERE created_at >= ?', [$from])->fetchAll(PDO::FETCH_COLUMN) as $ts) { $k = date('Y-m-d', (int)$ts); if (isset($days[$k])) $days[$k]['entries']++; }
+        foreach (q('SELECT day, COUNT(*) AS n FROM activity WHERE day >= ? GROUP BY day', [$dayInt($from)])->fetchAll() as $r) {
+            $k = substr((string)$r['day'], 0, 4) . '-' . substr((string)$r['day'], 4, 2) . '-' . substr((string)$r['day'], 6, 2);
+            if (isset($days[$k])) $days[$k]['active'] = (int)$r['n'];
+        }
+        $series = [];
+        foreach ($days as $k => $v) $series[] = ['d' => $k] + $v;
+        $users = q('SELECT u.username, u.created_at, u.last_seen_at, u.login_count,
+                      (SELECT COUNT(*) FROM entries e WHERE e.user_id = u.id) AS entries,
+                      (SELECT COUNT(*) FROM activity a WHERE a.user_id = u.id) AS active_days
+                    FROM users u ORDER BY u.last_seen_at DESC, u.id DESC LIMIT 1000')->fetchAll();
+        foreach ($users as &$u) foreach (['created_at', 'last_seen_at', 'login_count', 'entries', 'active_days'] as $k) $u[$k] = (int)$u[$k];
+        out(['generated' => time(), 'tz' => date_default_timezone_get(), 'totals' => $t, 'series' => $series, 'users' => $users]);
+    } catch (PDOException $e) {
+        fail('Dashboard tables are missing. Run migrations/001-admin-dashboard.sql in phpMyAdmin.', 500);
+    }
 }
 
 default:
