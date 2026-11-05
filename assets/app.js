@@ -16,7 +16,7 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const te = new TextEncoder(), td = new TextDecoder();
 
 const S = {
-  name: '', key: null, auth: '', salt: '', iter: DEFAULT_ITER,
+  name: '', key: null, auth: '', salt: '', iter: DEFAULT_ITER, mk: null, // mk: PBKDF2 output, kept in memory only so fingerprint unlock can be set up
   entries: [],            // [{id, d:{t,at,loc,game,stakes,hu,min,res}}] sorted newest first
   prefs: null,
   view: 'add', page: 0, type: 'cash', sign: 1, editId: 0,
@@ -74,11 +74,138 @@ function buyinAmount(st) {
 async function deriveKeys(pass, saltB64, iter) {
   const base = await crypto.subtle.importKey('raw', te.encode(pass.normalize('NFKC')), 'PBKDF2', false, ['deriveBits']);
   const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: unb64(saltB64), iterations: iter }, base, 256);
+  return { ...(await keysFromBits(bits)), bits };
+}
+async function keysFromBits(bits) {
   const hk = await crypto.subtle.importKey('raw', bits, 'HKDF', false, ['deriveBits', 'deriveKey']);
   const zero = new Uint8Array(32);
   const auth = await crypto.subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt: zero, info: te.encode('pkrtrckr auth v1') }, hk, 256);
   const key = await crypto.subtle.deriveKey({ name: 'HKDF', hash: 'SHA-256', salt: zero, info: te.encode('pkrtrckr enc v1') }, hk, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
   return { auth: hex(auth), key };
+}
+
+/* ---------- fingerprint unlock (WebAuthn + PRF) ----------
+ * The phone's fingerprint/face authenticator produces a secret (PRF output) only after the
+ * user verifies. That secret encrypts the master key, stored only on this device. Nothing
+ * changes on the server: unlocking just recovers the same keys the passphrase would give. */
+const BIO = 'pkr.bio';
+const BIO_UNSUPPORTED = 'This browser can’t use fingerprint unlock for encrypted data. Try the latest Chrome on Android or Safari on iOS 18+.';
+function bioGet() { try { const v = JSON.parse(load(BIO) || 'null'); return v && v.v === 1 ? v : null; } catch (e) { return null; } }
+function bioSet(v) { store(BIO, v ? JSON.stringify(v) : null); }
+function b64u(buf) { return b64(buf).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
+function unb64u(s) { s = s.replace(/-/g, '+').replace(/_/g, '/'); return unb64(s + '==='.slice((s.length + 3) % 4)); }
+let bioOk = null;
+async function bioAvailable() {
+  if (bioOk !== null) return bioOk;
+  bioOk = false;
+  try {
+    if (!window.isSecureContext || !window.PublicKeyCredential || !navigator.credentials) return false;
+    if (!(await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable())) return false;
+    if (PublicKeyCredential.getClientCapabilities) {
+      const c = await PublicKeyCredential.getClientCapabilities();
+      if (c && c['extension:prf'] === false) return false;
+    }
+    bioOk = true;
+  } catch (e) { /* unsupported */ }
+  return bioOk;
+}
+async function bioWrapKey(prfOut) {
+  const hk = await crypto.subtle.importKey('raw', prfOut, 'HKDF', false, ['deriveKey']);
+  return crypto.subtle.deriveKey({ name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(32), info: te.encode('pkrtrckr device unlock v1') }, hk, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+}
+async function bioEval(credId, prfSalt) {
+  const a = await navigator.credentials.get({ publicKey: {
+    challenge: crypto.getRandomValues(new Uint8Array(32)), rpId: location.hostname, timeout: 60000,
+    allowCredentials: [{ type: 'public-key', id: credId }], userVerification: 'required',
+    extensions: { prf: { eval: { first: prfSalt } } },
+  } });
+  const r = a && a.getClientExtensionResults().prf;
+  if (!r || !r.results || !r.results.first) throw new Error(BIO_UNSUPPORTED);
+  return r.results.first;
+}
+async function bioEnable() {
+  if (!S.mk) throw new Error('Sign in with your passphrase first.');
+  const prfSalt = crypto.getRandomValues(new Uint8Array(32));
+  const cred = await navigator.credentials.create({ publicKey: {
+    rp: { name: 'pkrtrckr', id: location.hostname },
+    user: { id: crypto.getRandomValues(new Uint8Array(16)), name: S.name, displayName: S.name },
+    challenge: crypto.getRandomValues(new Uint8Array(32)),
+    pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+    authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'preferred' },
+    attestation: 'none', timeout: 60000,
+    extensions: { prf: { eval: { first: prfSalt } } },
+  } });
+  const ext = cred.getClientExtensionResults().prf || {};
+  if (ext.enabled === false) throw new Error(BIO_UNSUPPORTED);
+  // Some phones only evaluate PRF when signing in, so ask for the fingerprint once more if needed.
+  const out = (ext.results && ext.results.first) || await bioEval(new Uint8Array(cred.rawId), prfSalt);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: te.encode('pkrtrckr:bio:' + S.name) },
+    await bioWrapKey(out), te.encode(JSON.stringify({ mk: b64(S.mk), salt: S.salt, iter: S.iter })));
+  bioSet({ v: 1, name: S.name, cred: b64u(cred.rawId), prf: b64(prfSalt), iv: b64(iv), ct: b64(ct) });
+}
+function bioError(ex) {
+  if (ex && (ex.name === 'NotAllowedError' || ex.name === 'AbortError')) return 'Fingerprint cancelled.';
+  if (ex && ex.name === 'InvalidStateError') return 'This device already has a fingerprint key for pkrtrckr. Try again.';
+  return (ex && ex.message) || 'Fingerprint unlock failed.';
+}
+async function bioUnlock() {
+  const b = bioGet(); if (!b) return;
+  const err = $('#authErr'); err.textContent = '';
+  let out;
+  try { out = await bioEval(unb64u(b.cred), unb64(b.prf)); }
+  catch (ex) { err.textContent = bioError(ex) + ' You can also sign in with your passphrase.'; return; }
+  busy('Unlocking…');
+  try {
+    let pt;
+    try {
+      pt = JSON.parse(td.decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(b.iv), additionalData: te.encode('pkrtrckr:bio:' + b.name) }, await bioWrapKey(out), unb64(b.ct))));
+    } catch (x) { throw Object.assign(new Error('stale'), { stale: true }); }
+    const bits = unb64(pt.mk).buffer;
+    const k = await keysFromBits(bits);
+    try { await api('login', { username: b.name, auth: k.auth }); }
+    catch (x) { if (/wrong name or passphrase/i.test(x.message)) x.stale = true; throw x; }
+    Object.assign(S, { name: b.name, key: k.key, auth: k.auth, salt: pt.salt, iter: pt.iter, mk: bits });
+    store('pkr.name', b.name);
+    await loadData();
+    enterApp();
+  } catch (ex) {
+    if (ex.stale) { bioSet(null); renderBio(); err.textContent = 'Fingerprint unlock no longer works for this account. Sign in with your passphrase and turn it on again in Settings.'; }
+    else err.textContent = ex.message;
+  } finally { busy(); }
+}
+function renderBio() {
+  const b = bioGet();
+  const show = !!b && authMode === 'login';
+  $('#bioBtn').hidden = $('#bioOr').hidden = !show;
+  $('#authBtn').classList.toggle('primary', !show); // one main button at a time
+  if (b) $('#bioName').textContent = b.name;
+}
+async function renderBioSettings() {
+  const ok = await bioAvailable(); const b = bioGet();
+  $('#bioSection').hidden = !ok && !b;
+  const on = !!b && b.name === S.name;
+  $('#bioStatus').textContent = on ? 'On for this device.' : b ? `Set up for “${b.name}” on this device. Turning it on here replaces that.` : 'Unlock pkrtrckr with your fingerprint (or face) on this device instead of typing your passphrase.';
+  $('#bioToggle').textContent = on ? 'Turn off' : 'Turn on';
+  $('#bioToggle').classList.toggle('primary', !on);
+}
+async function bioOffer() {
+  // After a passphrase sign-in, offer fingerprint unlock once per device.
+  const card = $('#bioCard');
+  card.hidden = true;
+  if (bioGet() || load('pkr.bioAsked') || !(await bioAvailable())) return;
+  card.hidden = false;
+}
+async function bioTurnOn(fromCard) {
+  try {
+    await bioEnable();
+    toast('Fingerprint unlock is on');
+    $('#bioCard').hidden = true;
+  } catch (ex) {
+    const m = bioError(ex);
+    if (fromCard) { $('#bioCardErr').textContent = m; } else { $('#setErr').textContent = m; }
+  }
+  renderBioSettings();
 }
 async function seal(obj, kind) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -116,6 +243,7 @@ function setAuthMode(m) {
   $('#authPass').autocomplete = m === 'signup' ? 'new-password' : 'current-password';
   $('#authBtn').textContent = m === 'signup' ? 'Create account' : 'Sign in';
   $('#authErr').textContent = '';
+  renderBio();
 }
 async function onAuth(e) {
   e.preventDefault();
@@ -139,11 +267,12 @@ async function onAuth(e) {
     }
     const k = await deriveKeys(pass, salt, iter);
     await api(authMode, { username: name, auth: k.auth, salt, iter });
-    Object.assign(S, { name, key: k.key, auth: k.auth, salt, iter });
+    Object.assign(S, { name, key: k.key, auth: k.auth, salt, iter, mk: k.bits });
     store('pkr.name', name);
     $('#authPass').value = $('#authPass2').value = '';
     await loadData();
     enterApp();
+    bioOffer();
     if (authMode === 'signup') toast('Account created');
   } catch (ex) {
     err.textContent = ex.message;
@@ -152,13 +281,16 @@ async function onAuth(e) {
   }
 }
 function lock(msg) {
-  S.key = null; S.auth = ''; S.entries = []; S.prefs = null; S.editId = 0;
+  S.key = null; S.auth = ''; S.mk = null; S.entries = []; S.prefs = null; S.editId = 0;
+  $('#bioCard').hidden = true;
   $('#app').hidden = true; $('#auth').hidden = false;
   if ($('#settings').open) $('#settings').close();
   setAuthMode('login');
   $('#authName').value = S.name || load('pkr.name') || '';
   $('#authErr').textContent = msg || '';
-  ($('#authName').value ? $('#authPass') : $('#authName')).focus();
+  renderBio();
+  if (bioGet()) $('#bioBtn').focus(); // don't pop the keyboard when a fingerprint will do
+  else ($('#authName').value ? $('#authPass') : $('#authName')).focus();
 }
 let idleT, lastPing = 0;
 function activity() {
@@ -623,6 +755,7 @@ function openSettings() {
   $('#setCurrency').value = cur();
   $('#setErr').textContent = '';
   renderListsEditor();
+  renderBioSettings();
   $('#settings').showModal();
 }
 function csvCell(v) {
@@ -697,6 +830,7 @@ async function deleteAccount() {
   try {
     const k = await deriveKeys(pass, S.salt, S.iter);
     await api('delete_account', { auth: k.auth });
+    const b = bioGet(); if (b && b.name === S.name) bioSet(null);
     store('pkr.name', null); S.name = '';
     lock('Account deleted.');
   } catch (ex) { err.textContent = ex.message; }
@@ -707,6 +841,15 @@ async function deleteAccount() {
 function init() {
   $('#authTabs').addEventListener('click', e => { const b = e.target.closest('button'); if (b) setAuthMode(b.dataset.mode); });
   $('#authForm').addEventListener('submit', onAuth);
+  $('#bioBtn').addEventListener('click', bioUnlock);
+  $('#bioCardOn').addEventListener('click', () => { $('#bioCardErr').textContent = ''; bioTurnOn(true); });
+  $('#bioCardNo').addEventListener('click', () => { store('pkr.bioAsked', '1'); $('#bioCard').hidden = true; });
+  $('#bioToggle').addEventListener('click', () => {
+    $('#setErr').textContent = '';
+    const b = bioGet();
+    if (b && b.name === S.name) { bioSet(null); toast('Fingerprint unlock turned off'); renderBioSettings(); }
+    else bioTurnOn(false);
+  });
 
   $$('.tabs button').forEach(b => b.addEventListener('click', () => { if (b.dataset.go === 'add' && S.editId) resetForm(); go(b.dataset.go); }));
   $('#typeSeg').addEventListener('click', e => { const b = e.target.closest('button'); if (b) setType(b.dataset.type); });

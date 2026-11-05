@@ -16,8 +16,8 @@
 <link rel="icon" href="assets/favicon-16.png" type="image/png" sizes="16x16">
 <link rel="apple-touch-icon" href="assets/icon-180.png">
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="stylesheet" href="assets/app.css?v=3">
-<script src="assets/app.js?v=3" defer></script>
+<link rel="stylesheet" href="assets/app.css?v=4">
+<script src="assets/app.js?v=4" defer></script>
 </head>
 <body>
 
@@ -34,6 +34,12 @@
       <button type="button" role="tab" data-mode="login" aria-selected="true">Sign in</button>
       <button type="button" role="tab" data-mode="signup" aria-selected="false">Create account</button>
     </div>
+
+    <button type="button" class="btn primary block bio-btn" id="bioBtn" hidden>
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M7.5 5.6A8 8 0 0 1 20 12v1.5M4 12a8 8 0 0 1 1.2-4.2M8 12a4 4 0 0 1 8 0v2.5c0 1.6-.4 3.2-1.1 4.6M12 12v3c0 2.4-.8 4.6-2.2 6.3M4.5 16.5c.9-1.2 1.4-2.8 1.4-4.5M16.3 21.5c.8-1.4 1.4-3 1.6-4.7"/></svg>
+      <span>Unlock with fingerprint <small>as <span id="bioName"></span></small></span>
+    </button>
+    <p class="or" id="bioOr" hidden><span>or use your passphrase</span></p>
 
     <form id="authForm" autocomplete="on" novalidate>
       <label class="field">
@@ -67,6 +73,10 @@
 
   <!-- ADD / EDIT -->
   <section class="view" id="view-add" data-view="add">
+    <div class="bio-card" id="bioCard" hidden>
+      <div><b>Use your fingerprint next time?</b><p>Skip typing your passphrase on this device. You can change this in Settings.</p><p class="err" id="bioCardErr"></p></div>
+      <div class="row-btns"><button type="button" class="btn sm primary" id="bioCardOn">Turn on</button><button type="button" class="btn sm ghost" id="bioCardNo">Not now</button></div>
+    </div>
     <h2 class="view-title" id="formTitle">New session</h2>
     <form id="entryForm" novalidate>
       <div class="seg" id="typeSeg" role="radiogroup" aria-label="Format">
@@ -228,6 +238,11 @@
     <h3>Your lists</h3>
     <p class="muted small">Remove entries you no longer use. Past sessions keep their values.</p>
     <div id="listsEditor"></div>
+    <div id="bioSection" hidden>
+      <h3>Fingerprint unlock</h3>
+      <p class="muted small" id="bioStatus"></p>
+      <div class="row-btns"><button type="button" class="btn sm" id="bioToggle">Turn on</button></div>
+    </div>
     <h3>Backup</h3>
     <div class="row-btns">
       <button type="button" class="btn sm" id="exportCsv">Export CSV</button>
