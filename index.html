@@ -16,8 +16,8 @@
 <link rel="icon" href="assets/favicon-16.png" type="image/png" sizes="16x16">
 <link rel="apple-touch-icon" href="assets/icon-180.png">
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="stylesheet" href="assets/app.css?v=7">
-<script src="assets/app.js?v=7" defer></script>
+<link rel="stylesheet" href="assets/app.css?v=8">
+<script src="assets/app.js?v=8" defer></script>
 </head>
 <body>
 
@@ -118,9 +118,9 @@
         <div class="add-row" hidden><input id="stakesNew" placeholder="e.g. 1/2 or 2/5" maxlength="20"><button type="button" class="btn sm">Add</button></div>
       </div>
 
-      <div class="grid2">
+      <div class="grid2 grid3">
         <label class="field">
-          <span>Duration (minutes)</span>
+          <span>Duration (min)</span>
           <input id="fMinutes" type="number" inputmode="numeric" min="1" max="5000" step="1" placeholder="240" required>
           <small class="hint" id="minHint">&nbsp;</small>
         </label>
@@ -128,6 +128,18 @@
           <input type="checkbox" id="fHU">
           <span class="box" aria-hidden="true"></span>
           <span>HU <small>heads-up</small></span>
+        </label>
+        <label class="grade-box" title="Rate your game">
+          <span class="gb-k">Rate<small>my game</small></span>
+          <span class="gb-v" id="gradeShow" data-g="">–</span>
+          <!-- The real select sits invisibly on top: the phone's own picker shows the full descriptions. -->
+          <select id="fGrade" aria-label="Rate your game">
+            <option value="">Not rated</option>
+            <option value="A">A — Best game: focused, aware of position and players, no tilt</option>
+            <option value="B">B — OK: no tilt, but not really focused or paying close attention</option>
+            <option value="C">C — Sub-optimal: bad calls, chased draws, too loose</option>
+            <option value="D">D — Terrible: tilted, threw money away</option>
+          </select>
         </label>
       </div>
 
@@ -256,7 +268,7 @@
       <button type="button" class="btn sm" id="exportCsv">Export CSV</button>
       <label class="btn sm file-btn">Import CSV<input type="file" id="importCsv" accept=".csv,text/csv"></label>
     </div>
-    <p class="muted small">CSV columns: date, type, location, game, stakes, hu, minutes, result, note. Export is decrypted on your device — keep the file somewhere safe.</p>
+    <p class="muted small">CSV columns: date, type, location, game, stakes, hu, minutes, result, note, rating. Export is decrypted on your device — keep the file somewhere safe.</p>
     <p class="err" id="setErr" role="alert"></p>
     <p id="adminLinkWrap" hidden><a class="btn sm" href="admin.html">Open admin dashboard</a></p>
     <div class="row-btns spread">

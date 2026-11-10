@@ -441,3 +441,31 @@ textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; 
 .cal-day:empty { display: none; }
 .cal-day { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; }
 .cal-day h4 { margin: 0 0 8px; font-size: 14px; font-variant-numeric: tabular-nums; }
+
+/* ---------- game rating ---------- */
+.grid3 { grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; }
+.grid3 .check { padding: 0 10px; gap: 8px; }
+.grade-box {
+  position: relative; display: flex; align-items: center; gap: 8px; min-height: 48px; margin-top: 25px;
+  padding: 0 10px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface-2);
+  font-weight: 650; cursor: pointer; user-select: none;
+}
+.grade-box .gb-k { line-height: 1.1; }
+.grade-box .gb-k small { font-weight: 400; color: var(--muted); font-size: 12px; display: block; }
+.grade-box .gb-v {
+  min-width: 28px; height: 28px; border-radius: 7px; display: grid; place-items: center;
+  font-weight: 800; font-size: 15px; background: var(--surface); border: 1px solid var(--line); color: var(--muted);
+}
+.grade-box select {
+  position: absolute; inset: 0; width: 100%; height: 100%; min-height: 0; padding: 0;
+  opacity: 0; cursor: pointer; font-size: 16px; /* 16px stops iOS from zooming in */
+}
+.grade-box:has(select:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.gb-v[data-g="A"], .badge.grade.gA { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.gb-v[data-g="B"], .badge.grade.gB { color: var(--text); border-color: var(--text-2); }
+.gb-v[data-g="C"], .badge.grade.gC { background: var(--warn-bg); border-color: var(--warn-line); color: var(--text); }
+.gb-v[data-g="D"], .badge.grade.gD { background: color-mix(in srgb, var(--neg) 14%, transparent); border-color: var(--neg); color: var(--neg); }
+.badge.grade { min-width: 18px; text-align: center; }
+@media (max-width: 370px) {
+  .grid3 .check small, .grade-box .gb-k small { display: none; }
+}
